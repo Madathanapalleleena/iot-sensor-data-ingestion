@@ -1,0 +1,89 @@
+#%RAML 1.0
+
+title: Telemetry Ingestion API
+version: v1
+baseUri: /api
+mediaType: application/json
+
+types:
+  Reading:
+    type: object
+    properties:
+      metricName: string
+      value: number
+      unit: string
+      readingTimestamp: datetime
+      quality?: string
+
+  TelemetryRequest:
+    type: object
+    properties:
+      deviceId: string
+      siteId: string
+      firmwareVersion: string
+      batchId: string
+      readings:
+        type: Reading[]
+        minItems: 1
+
+  RejectedReading:
+    type: object
+    properties:
+      index: integer
+      metricName?: string
+      reason: string
+
+/telemetry:
+  post:
+    description: Ingest single or multiple telemetry readings
+    headers:
+      x-device-api-key:
+        type: string
+        required: true
+
+    body:
+      application/json:
+        type: TelemetryRequest
+        example:
+          deviceId: DEV-CHN-00417
+          siteId: SITE-CHN-02
+          firmwareVersion: "3.2.1"
+          batchId: BATCH-2026-09-11-0091
+          readings:
+            - metricName: TEMPERATURE
+              value: 78.4
+              unit: CELSIUS
+              readingTimestamp: "2026-09-11T09:15:00+05:30"
+              quality: GOOD
+
+    responses:
+      202:
+        body:
+          application/json:
+            example:
+              batchId: BATCH-2026-09-11-0091
+              deviceId: DEV-CHN-00417
+              acceptedCount: 1
+              rejectedCount: 0
+              rejected: []
+              status: QUEUED
+              correlationId: abc-123
+
+      400:
+        body:
+          application/json:
+            example:
+              status: ERROR
+              message: Invalid request
+
+      401:
+        body:
+          application/json:
+            example:
+              message: Unauthorized
+
+      503:
+        body:
+          application/json:
+            example:
+              message: Processing service unavailable

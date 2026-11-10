@@ -1,0 +1,6 @@
+http:
+  port: "8081"
+
+processing:
+  host: "localhost"
+  port: "8082"

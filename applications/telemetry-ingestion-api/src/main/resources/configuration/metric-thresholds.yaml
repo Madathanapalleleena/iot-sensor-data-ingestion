@@ -1,0 +1,28 @@
+metrics:
+  TEMPERATURE:
+    unit: CELSIUS
+    min: -20.0
+    max: 120.0
+    warning: 75.0
+    critical: 95.0
+
+  VIBRATION:
+    unit: MM_PER_SEC
+    min: 0.0
+    max: 50.0
+    warning: 4.0
+    critical: 8.0
+
+  PRESSURE:
+    unit: BAR
+    min: 0.0
+    max: 10.0
+    warning: 6.0
+    critical: 8.5
+
+ingestion:
+  batchSize: 500
+  batchTimeoutMillis: 2000
+  consumerConcurrency: 4
+  maxFutureSkewMinutes: 5
+  retentionWindowDays: 30
