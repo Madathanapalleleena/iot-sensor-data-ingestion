@@ -1,0 +1,54 @@
+#%RAML 1.0
+title: Telemetry System API
+version: v1
+baseUri: http://localhost:8082/api
+
+types:
+  Reading:
+    type: object
+    properties:
+      deviceId: string
+      metricName: string
+      timestamp: string
+      value: number
+      unit: string
+      qualityFlag: string
+      breachStatus:
+        type: string
+        required: false
+      siteId:
+        type: string
+        required: false
+      firmwareVersion:
+        type: string
+        required: false
+      correlationId:
+        type: string
+        required: false
+
+/readings:
+  /bulk:
+    post:
+      description: Store processed sensor readings
+      body:
+        application/json:
+          type: Reading[]
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+
+/devices:
+  /{deviceId}:
+    get:
+      description: Retrieve registered device details
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+        404:
+          body:
+            application/json:
+              type: object

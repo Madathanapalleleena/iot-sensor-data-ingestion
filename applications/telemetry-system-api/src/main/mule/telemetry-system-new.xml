@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<configuration-properties file="config.yaml" />
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config">
+    <http:listener-connection host="${http.host}" port="${http.port}" />
+	</http:listener-config>
+
+	<apikit:config name="APIKit_Config" doc:name="APIKit Config" raml="api/telemetry-system-api.raml" httpStatusVarName="httpStatus" outboundHeadersMapName="outboundHeaders" />
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="cf761de9-0813-4960-82b7-9553f382a0bc">
+    <db:generic-connection
+        url="jdbc:mysql://${db.host}:${db.port}/${db.name}"
+        driverClassName="com.mysql.cj.jdbc.Driver"
+        user="${db.user}"
+        password="${db.password}" />
+	</db:config>
+	<configuration defaultErrorHandler-ref="global-error-handler" />
+
+<error-handler name="global-error-handler">
+
+    <!-- 400 / 404 / 405 / 406 / 415 / 501 and custom device-not-found -->
+    <on-error-propagate type="APIKIT:BAD_REQUEST, APIKIT:NOT_FOUND, APIKIT:METHOD_NOT_ALLOWED, APIKIT:NOT_ACCEPTABLE, APIKIT:UNSUPPORTED_MEDIA_TYPE, APIKIT:NOT_IMPLEMENTED, APP:DEVICE_NOT_FOUND">
+        <set-variable variableName="httpStatus"
+            value="#[{ BAD_REQUEST: 400, NOT_FOUND: 404, METHOD_NOT_ALLOWED: 405, NOT_ACCEPTABLE: 406, UNSUPPORTED_MEDIA_TYPE: 415, NOT_IMPLEMENTED: 501, DEVICE_NOT_FOUND: 404 }[error.errorType.identifier] default 500]" />
+        <ee:transform doc:name="Client error JSON">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status: vars.httpStatus,
+    error: error.errorType.identifier,
+    message: error.description,
+    timestamp: now()
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </on-error-propagate>
+
+    <!-- Database down: 503, and don't leak connection details -->
+    <on-error-propagate type="DB:CONNECTIVITY">
+        <logger level="ERROR" message="#['DB connectivity error: ' ++ (error.description default '')]" />
+        <set-variable variableName="httpStatus" value="503" />
+        <ee:transform doc:name="DB down JSON">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status: 503,
+    error: "SERVICE_UNAVAILABLE",
+    message: "The database is currently unavailable. Please try again later.",
+    timestamp: now()
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </on-error-propagate>
+
+    <!-- Everything else -->
+    <on-error-propagate type="ANY">
+        <logger level="ERROR" message="#['Unhandled error: ' ++ (error.description default '')]" />
+        <set-variable variableName="httpStatus" value="500" />
+        <ee:transform doc:name="Generic 500 JSON">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status: 500,
+    error: "INTERNAL_SERVER_ERROR",
+    message: "An unexpected error occurred. Please contact support.",
+    timestamp: now()
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </on-error-propagate>
+</error-handler>
+	<flow name="telemetry-system-new-main">
+    <http:listener config-ref="HTTP_Listener_config" path="/api/*">
+        <http:response statusCode="#[vars.httpStatus default 200]">
+            <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+        </http:response>
+        <http:error-response statusCode="#[vars.httpStatus default 500]">
+            <http:body>#[payload]</http:body>
+            <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+        </http:error-response>
+    </http:listener>
+
+    <apikit:router config-ref="APIKit_Config" />
+
+
+</flow>
+	<flow name="post:\readings\bulk:application\json:APIKit_Config">
+		    <!-- db:bulk-insert replaces the payload, so save the input first -->
+		    <set-variable variableName="readings" value="#[payload]" doc:name="Save readings" />
+		
+		    <try transactionalAction="ALWAYS_BEGIN">
+		        <!-- 1. History: duplicates are silently skipped -->
+		        <db:bulk-insert doc:name="Bulk insert" config-ref="Database_Config">
+		            <db:bulk-input-parameters><![CDATA[#[vars.readings map (item) -> {
+		                deviceId: item.deviceId,
+		                metricName: item.metricName,
+		                readingTimestamp: item.timestamp,
+		                metricValue: item.value,
+		                unit: item.unit,
+		                qualityFlag: item.qualityFlag,
+		                breachStatus: item.breachStatus default null,
+		                siteId: item.siteId default null,
+		                firmwareVersion: item.firmwareVersion default null,
+		                correlationId: item.correlationId default null
+		            }]]]></db:bulk-input-parameters>
+		            <db:sql><![CDATA[INSERT IGNORE INTO sensor_readings
+		(device_id, metric_name, reading_timestamp, metric_value, unit, quality_flag, breach_status, site_id, firmware_version, correlation_id)
+		VALUES
+		(:deviceId, :metricName, :readingTimestamp, :metricValue, :unit, :qualityFlag, :breachStatus, :siteId, :firmwareVersion, :correlationId)]]></db:sql>
+		        </db:bulk-insert>
+		
+		        <!-- 2. Only GOOD readings may update the current value -->
+		        <set-variable variableName="goodReadings"
+		            value="#[vars.readings filter ($.qualityFlag == 'GOOD')]" doc:name="Keep GOOD only" />
+		
+		        <choice>
+		            <when expression="#[!isEmpty(vars.goodReadings)]">
+		                <db:bulk-insert doc:name="Upsert current value" config-ref="Database_Config">
+		                    <db:bulk-input-parameters><![CDATA[#[vars.goodReadings map (item) -> {
+		                        deviceId: item.deviceId,
+		                        metricName: item.metricName,
+		                        metricValue: item.value,
+		                        unit: item.unit,
+		                        readingTimestamp: item.timestamp,
+		                        breachStatus: item.breachStatus default null
+		                    }]]]></db:bulk-input-parameters>
+		                    <db:sql><![CDATA[INSERT INTO sensor_current_value
+		(device_id, metric_name, metric_value, unit, reading_timestamp, breach_status)
+		VALUES
+		(:deviceId, :metricName, :metricValue, :unit, :readingTimestamp, :breachStatus)
+		ON DUPLICATE KEY UPDATE
+		  metric_value  = IF(VALUES(reading_timestamp) > reading_timestamp, VALUES(metric_value),  metric_value),
+		  unit          = IF(VALUES(reading_timestamp) > reading_timestamp, VALUES(unit),          unit),
+		  breach_status = IF(VALUES(reading_timestamp) > reading_timestamp, VALUES(breach_status), breach_status),
+		  reading_timestamp = IF(VALUES(reading_timestamp) > reading_timestamp, VALUES(reading_timestamp), reading_timestamp)]]></db:sql>
+		                </db:bulk-insert>
+		            </when>
+		        </choice>
+		    </try>
+		
+		    <ee:transform doc:name="Response">
+		        <ee:message>
+		            <ee:set-payload><![CDATA[%dw 2.0
+		output application/json
+		---
+		{
+		    received: sizeOf(vars.readings),
+		    currentValueCandidates: sizeOf(vars.goodReadings default [])
+		}]]></ee:set-payload>
+		        </ee:message>
+		    </ee:transform>
+		</flow>
+<flow name="get:\devices\(deviceId):APIKit_Config">
+    <set-variable variableName="deviceId" value="#[attributes.uriParams.deviceId]" />
+
+    <db:select doc:name="Select device" config-ref="Database_Config">
+        <db:sql><![CDATA[SELECT device_id, site_id, device_status, registered_at
+FROM device_registry
+WHERE device_id = :deviceId]]></db:sql>
+        <db:input-parameters><![CDATA[#[{ deviceId: vars.deviceId }]]]></db:input-parameters>
+    </db:select>
+
+    <choice>
+        <when expression="#[isEmpty(payload)]">
+            <raise-error type="APP:DEVICE_NOT_FOUND"
+                description="#['Device ' ++ vars.deviceId ++ ' was not found']" />
+        </when>
+        <otherwise>
+            <ee:transform doc:name="Device JSON">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    deviceId: payload[0].device_id,
+    siteId: payload[0].site_id,
+    status: payload[0].device_status,
+    registeredAt: payload[0].registered_at
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </otherwise>
+    </choice>
+</flow>
+</mule>

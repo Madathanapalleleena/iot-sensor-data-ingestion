@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<munit:config name="telemetry-system-api-test-suite.xml" />
+
+	<!-- 1. POST success -->
+<munit:test name="post-bulk-readings-success" description="Bulk insert saves history and updates current value">
+    <munit:behavior>
+        <!-- No doc:name filter: this mocks BOTH bulk-insert steps -->
+        <munit-tools:mock-when processor="db:bulk-insert">
+            <munit-tools:then-return>
+                <munit-tools:payload value="#[[1]]" />
+            </munit-tools:then-return>
+        </munit-tools:mock-when>
+        <munit:set-event>
+            <munit:payload value="#[[{
+                deviceId: 'DEV-CHN-00001',
+                metricName: 'temperature',
+                timestamp: '2026-11-11 13:58:00',
+                value: 23.5,
+                unit: 'C',
+                qualityFlag: 'GOOD',
+                breachStatus: 'NORMAL',
+                siteId: 'SITE-CHN-01',
+                firmwareVersion: '1.2.0',
+                correlationId: 'corr-0001'
+            }]]" />
+        </munit:set-event>
+    </munit:behavior>
+    <munit:execution>
+        <flow-ref name="post:\readings\bulk:application\json:APIKit_Config" />
+    </munit:execution>
+    <munit:validation>
+        <munit-tools:assert-that expression="#[payload.received]" is="#[MunitTools::equalTo(1)]" />
+        <munit-tools:assert-that expression="#[payload.currentValueCandidates]" is="#[MunitTools::equalTo(1)]" />
+        <munit-tools:verify-call processor="db:bulk-insert" times="2" />
+    </munit:validation>
+</munit:test>
+
+	<!-- 2. POST database down -->
+	<munit:test name="post-bulk-db-connectivity-error" description="DB failure surfaces as DB:CONNECTIVITY"
+		expectedErrorType="DB:CONNECTIVITY">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:bulk-insert">
+				<munit-tools:then-return>
+					<munit-tools:error typeId="DB:CONNECTIVITY" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#[[{ deviceId: 'DEV-CHN-00001', metricName: 'temperature', timestamp: '2026-11-11 13:58:00', value: 23.5, unit: 'C', qualityFlag: 'GOOD' }]]" />
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="post:\readings\bulk:application\json:APIKit_Config" />
+		</munit:execution>
+	</munit:test>
+
+	<!-- 3. GET device found -->
+	<munit:test name="get-device-found" description="Existing device returns JSON">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Select device" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[[{ device_id: 'DEV-CHN-00001', site_id: 'SITE-CHN-01', device_status: 'ACTIVE', registered_at: '2026-11-11T10:00:00' }]]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { deviceId: 'DEV-CHN-00001' } }]" />
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="get:\devices\(deviceId):APIKit_Config" />
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.deviceId]" is="#[MunitTools::equalTo('DEV-CHN-00001')]" />
+			<munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('ACTIVE')]" />
+		</munit:validation>
+	</munit:test>
+
+	<!-- 4. GET device not found -->
+	<munit:test name="get-device-not-found" description="Unknown device raises APP:DEVICE_NOT_FOUND"
+		expectedErrorType="APP:DEVICE_NOT_FOUND">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Select device" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[[]]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { deviceId: 'DOES-NOT-EXIST' } }]" />
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="get:\devices\(deviceId):APIKit_Config" />
+		</munit:execution>
+	</munit:test>
+
+</mule>
