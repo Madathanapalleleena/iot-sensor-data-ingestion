@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:anypoint-mq="http://www.mulesoft.org/schema/mule/anypoint-mq"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/anypoint-mq http://www.mulesoft.org/schema/mule/anypoint-mq/current/mule-anypoint-mq.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="cdd62f7c-20f9-46db-a83e-2a64fc2f277e" >
+		<http:listener-connection host="0.0.0.0" port="8082" />
+	</http:listener-config>
+	<http:request-config name="HTTP_Request_Config" doc:name="HTTP Request configuration" doc:id="4b2c696c-7a84-4806-ae3f-89983f96aed5" >
+		<http:request-connection host="localhost" port="8082" />
+	</http:request-config>
+	<configuration-properties doc:name="Configuration properties" doc:id="1f7bbcc9-15bb-4341-be90-4e40254e3152" file="metric-thresholds.yaml" />
+	<flow name="telemetry-processing-apiFlow1" doc:id="b1efd6f4-5160-454e-b828-498fac70ae9c" >
+		<http:listener doc:name="Listener" doc:id="ee74270d-f7bc-48fe-b105-fb1b928c2b65" config-ref="HTTP_Listener_config" path="/internal/process" allowedMethods="POST"/>
+		<logger level="INFO" doc:name="Log Incoming Telemetry" doc:id="46dac8a4-933a-4355-95d2-db84311004cf" message="recieved telemetry for processing" />
+		<flow-ref doc:name="telemetry-processing-flow" doc:id="277a86f6-5c76-4b69-aa79-2934002e3217" name="telemetry-processing-apiFlow"/>
+	</flow>
+	<flow name="telemetry-processing-apiFlow" doc:id="1d8dfabc-a774-427b-a6d7-45f0390664a2" >
+		<logger level="INFO" doc:name="Process Telemetry" doc:id="1471d72c-597b-4e08-a0b3-57ddfd010cc0" message='#[payload]'/>
+		<ee:transform doc:name="Transform Message" doc:id="ebda7509-ef6c-439b-ba8f-c54435917956" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[
+%dw 2.0
+output application/json
+
+var telemetry = payload
+var supportedMetrics = ["TEMPERATURE", "VIBRATION", "PRESSURE"]
+
+fun classify(metric, value) =
+    do {
+        var metricName = upper(metric)
+        var readingValue = value as Number
+        var minValue = Mule::p("metrics." ++ metricName ++ ".min") as Number
+        var maxValue = Mule::p("metrics." ++ metricName ++ ".max") as Number
+        var warningValue = Mule::p("metrics." ++ metricName ++ ".warning") as Number
+        var criticalValue = Mule::p("metrics." ++ metricName ++ ".critical") as Number
+        ---
+        if (readingValue < minValue or readingValue > maxValue)
+            "OUT_OF_RANGE"
+        else if (readingValue >= criticalValue)
+            "CRITICAL"
+        else if (readingValue >= warningValue)
+            "WARNING"
+        else
+            "NORMAL"
+    }
+
+// Validate each reading independently
+var assessedReadings =
+    (telemetry.readings default []) map ((reading, index) ->
+        do {
+            var metric =
+                if (reading is Object)
+                    upper((reading.metricName default "") as String)
+                else
+                    ""
+
+            var reason =
+                if (!(reading is Object))
+                    "Invalid reading object"
+                else if (isEmpty(metric))
+                    "Missing metric name"
+                else if (!(reading.value is Number))
+                    "Missing or invalid numeric value"
+                else if (isEmpty((reading.unit default "") as String))
+                    "Missing unit"
+                else if (!contains(supportedMetrics, metric))
+                    "Unsupported metric type"
+                else
+                    null
+            ---
+            {
+                index: index,
+                reading: reading,
+                metric: metric,
+                reason: reason
+            }
+        }
+    )
+
+var validReadings = assessedReadings filter ($.reason == null)
+var rejectedReadings = assessedReadings filter ($.reason != null)
+
+---
+{
+    deviceId: telemetry.deviceId,
+    siteId: telemetry.siteId,
+    firmwareVersion: telemetry.firmwareVersion,
+    batchId: telemetry.batchId,
+    correlationId: telemetry.correlationId,
+
+    readings: validReadings map (item) -> {
+        metricName: item.reading.metricName,
+        value: item.reading.value,
+        unit: item.reading.unit,
+        readingTimestamp: item.reading.readingTimestamp,
+        quality: item.reading.quality,
+        status: classify(item.metric, item.reading.value)
+    },
+
+    readingCount: sizeOf(validReadings),
+
+    rejectedCount: sizeOf(rejectedReadings),
+
+    rejected: rejectedReadings map (item) -> {
+        index: item.index,
+        metricName: item.metric,
+        reason: item.reason
+    },
+
+    processingStatus:
+        if (sizeOf(validReadings) == 0 and sizeOf(rejectedReadings) > 0)
+            "REJECTED"
+        else if (sizeOf(rejectedReadings) > 0)
+            "PARTIALLY_PROCESSED"
+        else
+            "PROCESSED",
+
+    processedAt: now()
+}
+]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+</mule>

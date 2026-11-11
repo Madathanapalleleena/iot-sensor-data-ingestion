@@ -1,0 +1,23 @@
+
+{
+  "deviceId": "DEV-CHN-00417",
+  "siteId": "SITE-CHN-02",
+  "firmwareVersion": "3.2.1",
+  "batchId": "BATCH-2026-09-11-0091",
+  "correlationId": "CORR-001",
+  "readings": [
+    {
+      "metricName": "TEMPERATURE",
+      "value": 78.4,
+      "unit": "CELSIUS",
+      "readingTimestamp": "2026-11-11T09:15:00+05:30",
+      "quality": "GOOD",
+      "status": "WARNING"
+    }
+  ],
+  "readingCount": 1,
+  "rejectedCount": 0,
+  "rejected": [],
+  "processingStatus": "PROCESSED",
+  "processedAt": "2026-11-11T11:10:00+05:30"
+}

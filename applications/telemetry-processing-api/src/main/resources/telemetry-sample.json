@@ -1,0 +1,31 @@
+
+{
+  "deviceId": "DEV-CHN-00417",
+  "siteId": "SITE-CHN-02",
+  "firmwareVersion": "3.2.1",
+  "batchId": "BATCH-2026-09-11-0091",
+  "correlationId": "CORR-001",
+  "readings": [
+    {
+      "metricName": "TEMPERATURE",
+      "value": 96,
+      "unit": "CELSIUS",
+      "readingTimestamp": "2026-11-11T09:15:00+05:30",
+      "quality": "GOOD"
+    },
+    {
+      "metricName": "VIBRATION",
+      "value": 2,
+      "unit": "MM_PER_SEC",
+      "readingTimestamp": "2026-11-11T09:16:00+05:30",
+      "quality": "GOOD"
+    },
+    {
+      "metricName": "PRESSURE",
+      "value": 9,
+      "unit": "BAR",
+      "readingTimestamp": "2026-11-11T09:17:00+05:30",
+      "quality": "GOOD"
+    }
+  ]
+}
