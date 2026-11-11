@@ -1,0 +1,33 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<types:mule xmlns:types="http://www.mulesoft.org/schema/mule/types">
+  <types:catalog>
+    <types:type name="process" format="json">
+      <types:shape format="weave" example="telemetry-sample.json"><![CDATA[%dw 2.0
+
+type process = {|
+  deviceId: String, 
+  siteId: String, 
+  firmwareVersion: String, 
+  batchId: String, 
+  correlationId: String, 
+  readings: Array<{|    metricName: String,     value: Number {"typeId": "int"},     unit: String,     readingTimestamp: String,     quality: String  |}>
+|} {"example": "{\\\"deviceId\\\":\\\"DEV-CHN-00417\\\",\\\"siteId\\\":\\\"SITE-CHN-02\\\",\\\"firmwareVersion\\\":\\\"3.2.1\\\",\\\"batchId\\\":\\\"BATCH-2026-09-11-0091\\\",\\\"correlationId\\\":\\\"CORR-001\\\",\\\"readings\\\":[{\\\"metricName\\\":\\\"TEMPERATURE\\\",\\\"value\\\":96,\\\"unit\\\":\\\"CELSIUS\\\",\\\"readingTimestamp\\\":\\\"2026-11-11T09:15:00+05:30\\\",\\\"quality\\\":\\\"GOOD\\\"},{\\\"metricName\\\":\\\"VIBRATION\\\",\\\"value\\\":2,\\\"unit\\\":\\\"MM_PER_SEC\\\",\\\"readingTimestamp\\\":\\\"2026-11-11T09:16:00+05:30\\\",\\\"quality\\\":\\\"GOOD\\\"},{\\\"metricName\\\":\\\"PRESSURE\\\",\\\"value\\\":9,\\\"unit\\\":\\\"BAR\\\",\\\"readingTimestamp\\\":\\\"2026-11-11T09:17:00+05:30\\\",\\\"quality\\\":\\\"GOOD\\\"}]}"}
+
+]]></types:shape>
+    </types:type>
+  </types:catalog>
+  <types:enrichment select="#ebda7509-ef6c-439b-ba8f-c54435917956">
+    <types:processor-declaration>
+      <types:input-event>
+        <types:message>
+          <types:payload type="process"/>
+        </types:message>
+      </types:input-event>
+      <types:output-event>
+        <types:message>
+          <types:payload type="process"/>
+        </types:message>
+      </types:output-event>
+    </types:processor-declaration>
+  </types:enrichment>
+</types:mule>

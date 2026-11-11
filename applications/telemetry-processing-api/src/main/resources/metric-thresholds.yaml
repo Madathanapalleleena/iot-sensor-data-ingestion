@@ -1,0 +1,22 @@
+
+metrics:
+  TEMPERATURE:
+    unit: "CELSIUS"
+    min: "-20"
+    max: "120"
+    warning: "75"
+    critical: "95"
+
+  VIBRATION:
+    unit: "MM_PER_SEC"
+    min: "0"
+    max: "50"
+    warning: "4"
+    critical: "8"
+
+  PRESSURE:
+    unit: "BAR"
+    min: "0"
+    max: "10"
+    warning: "6"
+    critical: "8.5"
